@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cam's Training V1.1</title>
+
+<style>
+body{margin:0;font-family:Arial,sans-serif;background:#111;color:white;padding:16px}
+h1,h2,h3{margin-top:0}
+.card{background:#1d1d1d;border-radius:16px;padding:16px;margin-bottom:16px}
+.exercise{background:#292929;border-radius:14px;padding:12px;margin-bottom:12px}
+button{width:100%;padding:13px;margin-top:8px;border:none;border-radius:12px;font-size:15px;font-weight:bold;background:#d6b879;color:#111}
+button.secondary{background:#333;color:white}
+button.danger{background:#7a2b2b;color:white}
+input,select,textarea{width:100%;padding:11px;margin-top:6px;margin-bottom:10px;border-radius:10px;border:none;font-size:15px;box-sizing:border-box}
+textarea{min-height:70px}
+.hidden{display:none}
+.result{font-size:24px;color:#d6b879;font-weight:bold}
+.small{color:#aaa;font-size:13px}
+.line{padding:7px 0;border-bottom:1px solid #333}
+.good{color:#8bd17c}
+.bad{color:#ff7777}
+</style>
+</head>
+
+<body>
+
+<h1>Cam's Training V1.1</h1>
+<p class="small">Tonnage total • tonnage par muscle • historique • progression</p>
+
+<div id="home" class="card">
+  <button onclick="showScreen('newSession')">Nouvelle séance</button>
+  <button onclick="showScreen('templates')">Séances modèles</button>
+  <button onclick="showScreen('history')">Historique</button>
+  <button onclick="showScreen('progress')">Progression</button>
+</div>
+
+<div id="newSession" class="hidden">
+  <div class="card">
+    <h2>Nouvelle séance</h2>
+    <label>Modèle</label>
+    <select id="templateSelect"></select>
+    <button onclick="loadTemplate()">Charger</button>
+    <button class="secondary" onclick="showScreen('home')">Retour</button>
+  </div>
+  <div id="sessionEditor"></div>
+</div>
+
+<div id="templates" class="hidden">
+  <div class="card">
+    <h2>Séances modèles</h2>
+    <div id="templateList"></div>
+    <button onclick="createTemplate()">Créer une séance modèle</button>
+    <button class="secondary" onclick="showScreen('home')">Retour</button>
+  </div>
+</div>
+
+<div id="history" class="hidden">
+  <div class="card">
+    <h2>Historique</h2>
+    <label>Filtrer par séance</label>
+    <select id="historyTemplateFilter" onchange="renderHistory()"></select>
+    <label>Période</label>
+    <select id="historyDateFilter" onchange="renderHistory()">
+      <option value="all">Toutes</option>
+      <option value="7">7 jours</option>
+      <option value="30">30 jours</option>
+      <option value="90">90 jours</option>
+    </select>
+    <div id="historyList"></div>
+    <button class="secondary" onclick="showScreen('home')">Retour</button>
+  </div>
+</div>
+
+<div id="progress" class="hidden">
+  <div class="card">
+    <h2>Progression</h2>
+    <label>Filtrer par séance</label>
+    <select id="progressTemplateFilter" onchange="renderProgress()"></select>
+    <label>Période</label>
+    <select id="progressDateFilter" onchange="renderProgress()">
+      <option value="all">Toutes</option>
+      <option value="7">7 jours</option>
+      <option value="30">30 jours</option>
+      <option value="90">90 jours</option>
+    </select>
+    <div id="progressList"></div>
+    <button class="secondary" onclick="showScreen('home')">Retour</button>
+  </div>
+</div>
+
+<script>
+let templates = JSON.parse(localStorage.getItem("cams_templates_v11")) || [
+  {
+    name:"Upper Body Rebuild",
+    exercises:[
+      {name:"Développé incliné", muscle:"Pecs", weight:10, reps:10, sets:4},
+      {name:"Tirage horizontal", muscle:"Dos", weight:50, reps:10, sets:4},
+      {name:"Élévations latérales", muscle:"Épaules", weight:3, reps:12, sets:3},
+      {name:"Élévation frontale", muscle:"Épaules", weight:2, reps:15, sets:3},
+      {name:"Pupitre biceps", muscle:"Biceps", weight:8, reps:12, sets:4}
+    ]
+  },
+  {
+    name:"Leg Day",
+    exercises:[
+      {name:"Leg curl gauche", muscle:"Ischios", weight:5, reps:10, sets:3},
+      {name:"Leg curl droite", muscle:"Ischios", weight:15, reps:10, sets:3},
+      {name:"Hip thrust", muscle:"Fessiers", weight:5, reps:10, sets:3},
+      {name:"Presse unilatérale gauche", muscle:"Quadriceps", weight:20, reps:10, sets:3},
+      {name:"Presse unilatérale droite", muscle:"Quadriceps", weight:70, reps:10, sets:3},
+      {name:"Leg extension gauche", muscle:"Quadriceps", weight:15, reps:10, sets:3},
+      {name:"Leg extension droite", muscle:"Quadriceps", weight:30, reps:10, sets:3}
+    ]
+  }
+];
+
+let history = JSON.parse(localStorage.getItem("cams_history_v11")) || [];
+let currentSession = null;
+
+function saveData(){
+  localStorage.setItem("cams_templates_v11", JSON.stringify(templates));
+  localStorage.setItem("cams_history_v11", JSON.stringify(history));
+}
+
+function showScreen(id){
+  ["home","newSession","templates","history","progress"].forEach(x=>document.getElementById(x).classList.add("hidden"));
+  document.getElementById(id).classList.remove("hidden");
+  if(id==="newSession") renderTemplateSelect();
+  if(id==="templates") renderTemplates();
+  if(id==="history"){renderFilters("historyTemplateFilter");renderHistory();}
+  if(id==="progress"){renderFilters("progressTemplateFilter");renderProgress();}
+}
+
+function renderTemplateSelect(){
+  const s=document.getElementById("templateSelect");
+  s.innerHTML="";
+  templates.forEach((t,i)=>s.innerHTML+=`<option value="${i}">${t.name}</option>`);
+}
+
+function renderFilters(id){
+  const s=document.getElementById(id);
+  const names=[...new Set(history.map(h=>h.name))];
+  s.innerHTML=`<option value="all">Toutes les séances</option>`;
+  names.forEach(n=>s.innerHTML+=`<option value="${n}">${n}</option>`);
+}
+
+function tonnage(ex){
+  return Number(ex.weight||0)*Number(ex.reps||0)*Number(ex.sets||0);
+}
+
+function totalSession(exercises){
+  return exercises.reduce((sum,ex)=>sum+tonnage(ex),0);
+}
+
+function tonnageByMuscle(exercises){
+  const result={};
+  exercises.forEach(ex=>{
+    if(!result[ex.muscle]) result[ex.muscle]=0;
+    result[ex.muscle]+=tonnage(ex);
+  });
+  return result;
+}
+
+function today(){
+  return new Date().toISOString().slice(0,10);
+}
+
+function formatDate(d){
+  return new Date(d).toLocaleDateString("fr-FR");
+}
+
+function filterByDate(items, days){
+  if(days==="all") return items;
+  const limit=new Date();
+  limit.setDate(limit.getDate()-Number(days));
+  return items.filter(s=>new Date(s.date)>=limit);
+}
+
+function loadTemplate(){
+  const index=document.getElementById("templateSelect").value;
+  const template=templates[index];
+
+  currentSession={
+    date:today(),
+    name:template.name,
+    note:"",
+    exercises:JSON.parse(JSON.stringify(template.exercises))
+  };
+
+  renderSessionEditor();
+}
+
+function renderSessionEditor(){
+  if(!currentSession) return;
+  const c=document.getElementById("sessionEditor");
+
+  let html=`<div class="card"><h2>${currentSession.name}</h2>
+  <label>Date</label>
+  <input type="date" value="${currentSession.date}" onchange="currentSession.date=this.value">`;
+
+  currentSession.exercises.forEach((ex,i)=>{
+    html+=`
+    <div class="exercise">
+      <h3>${ex.name}</h3>
+
+      <label>Exercice</label>
+      <input value="${ex.name}" oninput="updateExercise(${i},'name',this.value)">
+
+      <label>Muscle principal</label>
+      <input value="${ex.muscle}" oninput="updateExercise(${i},'muscle',this.value)">
+
+      <label>Poids</label>
+      <input type="number" step="0.5" value="${ex.weight}" oninput="updateExercise(${i},'weight',this.value)">
+
+      <label>Répétitions</label>
+      <input type="number" value="${ex.reps}" oninput="updateExercise(${i},'reps',this.value)">
+
+      <label>Séries</label>
+      <input type="number" value="${ex.sets}" oninput="updateExercise(${i},'sets',this.value)">
+
+      <p>Tonnage exercice : <strong>${tonnage(ex)} kg</strong></p>
+      <button class="danger" onclick="removeExercise(${i})">Supprimer exercice</button>
+    </div>`;
+  });
+
+  const muscles=tonnageByMuscle(currentSession.exercises);
+  const total=totalSession(currentSession.exercises);
+
+  html+=`<button onclick="addExercise()">Ajouter exercice</button>
+  <h3>Tonnage par muscle</h3>`;
+
+  Object.keys(muscles).forEach(m=>{
+    html+=`<div class="line">${m} : <strong>${muscles[m]} kg</strong></div>`;
+  });
+
+  html+=`
+  <h3>Tonnage total</h3>
+  <div class="result">${total} kg</div>
+
+  <label>Commentaire séance</label>
+  <textarea id="noteBox" placeholder="Énergie, douleur, spasticité, congestion...">${currentSession.note || ""}</textarea>
+
+  <button onclick="saveSession()">Enregistrer séance</button>
+  </div>`;
+
+  c.innerHTML=html;
+}
+
+function updateExercise(i,field,value){
+  if(["weight","reps","sets"].includes(field)) value=Number(value);
+  currentSession.exercises[i][field]=value;
+  renderSessionEditor();
+}
+
+function addExercise(){
+  currentSession.exercises.push({name:"Nouvel exercice", muscle:"À définir", weight:0, reps:10, sets:1});
+  renderSessionEditor();
+}
+
+function removeExercise(i){
+  currentSession.exercises.splice(i,1);
+  renderSessionEditor();
+}
+
+function saveSession(){
+  currentSession.note=document.getElementById("noteBox").value;
+  history.unshift(JSON.parse(JSON.stringify(currentSession)));
+  saveData();
+  currentSession=null;
+  document.getElementById("sessionEditor").innerHTML="";
+  alert("Séance enregistrée");
+  showScreen("history");
+}
+
+function renderHistory(){
+  const templateFilter=document.getElementById("historyTemplateFilter").value;
+  const dateFilter=document.getElementById("historyDateFilter").value;
+
+  let list=[...history];
+  if(templateFilter!=="all") list=list.filter(s=>s.name===templateFilter);
+  list=filterByDate(list,dateFilter);
+
+  const c=document.getElementById("historyList");
+  if(list.length===0){c.innerHTML="<p>Aucune séance.</p>";return;}
+
+  let html="";
+  list.forEach((s,i)=>{
+    const muscles=tonnageByMuscle(s.exercises);
+    const total=totalSession(s.exercises);
+
+    html+=`<div class="exercise">
+      <h3>${formatDate(s.date)} — ${s.name}</h3>
+      <div class="result">${total} kg</div>
+      <h4>Par muscle</h4>`;
+
+    Object.keys(muscles).forEach(m=>{
+      html+=`<div class="line">${m} : <strong>${muscles[m]} kg</strong></div>`;
+    });
+
+    if(s.note) html+=`<p class="small">Note : ${s.note}</p>`;
+    html+=`</div>`;
+  });
+
+  c.innerHTML=html;
+}
+
+function renderProgress(){
+  const templateFilter=document.getElementById("progressTemplateFilter").value;
+  const dateFilter=document.getElementById("progressDateFilter").value;
+
+  let list=[...history];
+  if(templateFilter!=="all") list=list.filter(s=>s.name===templateFilter);
+  list=filterByDate(list,dateFilter);
+
+  const c=document.getElementById("progressList");
+  if(list.length===0){c.innerHTML="<p>Aucune donnée.</p>";return;}
+
+  let muscleTotals={};
+  let recordsWeight={};
+  let recordsTonnage={};
+
+  list.forEach(s=>{
+    s.exercises.forEach(ex=>{
+      const t=tonnage(ex);
+      muscleTotals[ex.muscle]=(muscleTotals[ex.muscle]||0)+t;
+      recordsTonnage[ex.name]=Math.max(recordsTonnage[ex.name]||0,t);
+      recordsWeight[ex.name]=Math.max(recordsWeight[ex.name]||0,Number(ex.weight||0));
+    });
+  });
+
+  let html="<h3>Tonnage cumulé par muscle</h3>";
+  Object.keys(muscleTotals).forEach(m=>{
+    html+=`<div class="line">${m} : <strong>${muscleTotals[m]} kg</strong></div>`;
+  });
+
+  html+="<h3>Comparaison dernière séance vs précédente</h3>";
+  if(templateFilter==="all"){
+    html+="<p class='small'>Choisis un type de séance précis pour comparer.</p>";
+  } else {
+    const same=history.filter(s=>s.name===templateFilter).sort((a,b)=>new Date(b.date)-new Date(a.date));
+    if(same.length<2){
+      html+="<p class='small'>Il faut au moins deux séances de ce type.</p>";
+    } else {
+      const last=same[0];
+      const prev=same[1];
+      const diff=totalSession(last.exercises)-totalSession(prev.exercises);
+      const pct=totalSession(prev.exercises)>0 ? ((diff/totalSession(prev.exercises))*100).toFixed(1) : 0;
+      html+=`
+      <div class="line">Dernière : <strong>${totalSession(last.exercises)} kg</strong> (${formatDate(last.date)})</div>
+      <div class="line">Précédente : <strong>${totalSession(prev.exercises)} kg</strong> (${formatDate(prev.date)})</div>
+      <div class="line">Différence : <strong class="${diff>=0?'good':'bad'}">${diff>=0?'+':''}${diff} kg (${pct}%)</strong></div>
+      `;
+    }
+  }
+
+  html+="<h3>Records poids par exercice</h3>";
+  Object.keys(recordsWeight).forEach(ex=>{
+    html+=`<div class="line">${ex} : <strong>${recordsWeight[ex]} kg</strong></div>`;
+  });
+
+  html+="<h3>Records tonnage par exercice</h3>";
+  Object.keys(recordsTonnage).forEach(ex=>{
+    html+=`<div class="line">${ex} : <strong>${recordsTonnage[ex]} kg</strong></div>`;
+  });
+
+  c.innerHTML=html;
+}
+
+function renderTemplates(){
+  const c=document.getElementById("templateList");
+  let html="";
+
+  templates.forEach((t,i)=>{
+    html+=`<div class="exercise">
+      <h3>${t.name}</h3>
+      <p>${t.exercises.length} exercices</p>
+      <button onclick="editTemplate(${i})">Modifier / ajouter exercice</button>
+      <button class="danger" onclick="deleteTemplate(${i})">Supprimer modèle</button>
+    </div>`;
+  });
+
+  c.innerHTML=html;
+}
+
+function createTemplate(){
+  const name=prompt("Nom de la séance modèle ?");
+  if(!name) return;
+  templates.push({name:name, exercises:[]});
+  saveData();
+  renderTemplates();
+}
+
+function deleteTemplate(i){
+  if(!confirm("Supprimer ce modèle ?")) return;
+  templates.splice(i,1);
+  saveData();
+  renderTemplates();
+}
+
+function editTemplate(i){
+  const t=templates[i];
+  const action=prompt("Tape : nom / ajouter / supprimer", "ajouter");
+
+  if(action==="nom"){
+    const n=prompt("Nouveau nom",t.name);
+    if(n) t.name=n;
+  }
+
+  if(action==="ajouter"){
+    const name=prompt("Nom exercice");
+    const muscle=prompt("Muscle principal");
+    const weight=Number(prompt("Poids par défaut"));
+    const reps=Number(prompt("Répétitions par défaut"));
+    const sets=Number(prompt("Séries par défaut"));
+    t.exercises.push({name,muscle,weight,reps,sets});
+  }
+
+  if(action==="supprimer"){
+    const list=t.exercises.map((e,index)=>`${index} - ${e.name}`).join("\\n");
+    const n=Number(prompt("Numéro à supprimer :\\n"+list));
+    if(!isNaN(n)) t.exercises.splice(n,1);
+  }
+
+  saveData();
+  renderTemplates();
+}
+</script>
+
+</body>
+</html>
